@@ -141,7 +141,7 @@ for sim_timestamp in sim_timestamps:
         # random_seed=6,
         random_seed=random_seed,
         output_format=0,
-        pricing_scen_ct = 300000,
+        pricing_scen_ct = 'all',
         mpi_comm = comm
     )
     all_scenarios_df.loc[sim_timestamp] = scenarios_df

@@ -578,12 +578,18 @@ class Grid(object):
                 from powerscenarios.costs.exago.exago_lib import ExaGO_Lib
 
                 pricing_scen_ct = kwargs["pricing_scen_ct"]
+                if pricing_scen_ct == 'all':
+                    pricing_scen_ct = p_bin.shape[0]
+
                 mpi_comm = kwargs["mpi_comm"]
+
                 if mpi_comm.Get_rank() == 0:
                     print('Available Scenarios = ', p_bin.shape[0], ", Requested Scenarios = ", int(pricing_scen_ct))
+
                 p_bin = p_bin.tail(pricing_scen_ct)
                 pmodel = ExaGO_Lib(self.name,
-                                   n_scenarios, # Number of scenarios we actually want in our final csv file
+                                   n_scenarios, # Number of scenarios we actually want
+                                                # in our final csv file
                                    n_periods,
                                    loss_of_load_cost,
                                    spilled_wind_cost,

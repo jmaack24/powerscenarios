@@ -157,14 +157,16 @@ class ExaGO_Lib(AbstractCostingFidelity):
             idx_offset = nscen_local_arr[0:my_mpi_rank].sum() # np.dot(np.arange(my_mpi_rank)+1, nscen_local_arr[0:my_mpi_rank])
 
         q_cost_local = np.zeros(nscen_local_arr[my_mpi_rank])
-        local_opf_scen_dict = {}
+        q_sts_local = np.zeros(nscen_local_arr[my_mpi_rank], dtype=bool)
+        # local_opf_scen_dict = {}
         # print("my_mpi_rank = ", my_mpi_rank, ", idx_offset = ", idx_offset)
         # time_offset = idx_offset*step
         # ts = wind_scen_df.index[0] + pd.Timedelta(minutes=time_offset)
         for i in range(nscen_local_arr[my_mpi_rank]):
             ts = wind_scen_df.index[idx_offset + i] # Will not work for MPI
-            local_opf_scen_dict[i] = OPFLOW()
-            opf_object = local_opf_scen_dict[i] # For convenience as of now
+            # local_opf_scen_dict[i] = OPFLOW()
+            # opf_object = local_opf_scen_dict[i] # For convenience as of now
+            opf_object = OPFLOW()
             opf_object.dont_finalize()
             opf_object.read_mat_power_data(self.ego.network_file)
             opf_object.set_include_loadloss(True)
@@ -183,13 +185,23 @@ class ExaGO_Lib(AbstractCostingFidelity):
             # The following two lines are copied directly from base_cost for now.
             # Revisit them again
             wf_df = wind_scen_df.loc[ts:ts, :]
-            self.ego._set_wind_new(opf_object, wf_df, self.ego.imat.get_table('gen'), self.ego.gen_type)
+            self.ego._set_wind_new(opf_object,
+                                   wf_df,
+                                   self.ego.imat.get_table('gen'),
+                                   self.ego.gen_type)
 
             # Run the opflow realization
             opf_object.solve()
             opf_object.solution_to_ps()
 
-            q_cost_local[i] = opf_object.objective_function
+            sts = opf_object.convergence_status()
+            q_sts_local[i] = sts
+            if sts:
+                q_cost_local[i] = opf_object.objective_function
+            else:
+                ts_str = str(ts).replace(' ', 'T').replace(':','_').split('+')[0]
+                soln_file = 'ego_opflow_{}.m'.format(ts_str)
+                opf_object.save_solution('MATPOWER', soln_file)
 
             # Increment the time-stamp so as to price other scenarios
             # ts += pd.Timedelta(minutes=step)
@@ -202,6 +214,7 @@ class ExaGO_Lib(AbstractCostingFidelity):
         #     q_cost_global = None
         #     cost_n = None
         q_cost_global = np.empty(nscen_global, dtype=float)
+        q_sts_global = np.empty(nscen_global, dtype=bool)
 
         self.ego.comm.Barrier()
         # self.ego.comm.Gatherv(sendbuf=q_cost_local,
@@ -210,6 +223,15 @@ class ExaGO_Lib(AbstractCostingFidelity):
         self.ego.comm.Allgatherv(sendbuf=q_cost_local,
                                  recvbuf=(q_cost_global, nscen_local_arr))
         cost_n = pd.Series(index=wind_scen_df.index, data=q_cost_global)
+
+        self.ego.comm.Allgatherv(sendbuf=q_sts_local,
+                                 recvbuf=(q_sts_global, nscen_local_arr))
+        sts_n = pd.Series(index=wind_scen_df.index, data=q_sts_global)
+        if my_mpi_rank == 0:
+            idx = sts_n == False
+            if np.sum(idx) > 0:
+                print("ExaGO OPFLOW did not converge for the following timestamps:\n",
+                      sts_n[idx].index)
 
         # for i in range(comm_size):
         #     if my_mpi_rank == i:
@@ -305,42 +327,42 @@ class ExaGO_Python:
                       + gen_id.apply(str))
         self.wind_max = pmax
 
-        # Recover ExaGO executables, we will check if the exist in PATH and
-        # EXAGO_INSTALL_DIR
-        self.opflow_executable = self._check_for_exago('opflow')
-        self.sopflow_executable = self._check_for_exago('sopflow')
-        if my_mpi_rank == 0:
-            print("opflow executable = ", self.opflow_executable)
-            print("sopflow executable = ", self.sopflow_executable)
+        # # Recover ExaGO executables, we will check if the exist in PATH and
+        # # EXAGO_INSTALL_DIR
+        # self.opflow_executable = self._check_for_exago('opflow')
+        # self.sopflow_executable = self._check_for_exago('sopflow')
+        # if my_mpi_rank == 0:
+        #     print("opflow executable = ", self.opflow_executable)
+        #     print("sopflow executable = ", self.sopflow_executable)
 
         stop_init = time.time()
         # print("Init complete. Time: {:g}(s)".format(stop_init - start_init))
 
         return
 
-    def _check_for_exago(self, executable_name):
-        # This function checks if an exago executable exists
-        # Step 1: Check for exago executable in PATH
-        val = 0
-        for path in os.environ["PATH"].split(os.pathsep):
-            exe_file = os.path.join(path, executable_name)
-            if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
-                executable_full_path = path + '/' + executable_name
-                val += 1
-                # print("ExaGO executable {0} found in PATH".format(executable_name))
-                return executable_full_path
+    # def _check_for_exago(self, executable_name):
+    #     # This function checks if an exago executable exists
+    #     # Step 1: Check for exago executable in PATH
+    #     val = 0
+    #     for path in os.environ["PATH"].split(os.pathsep):
+    #         exe_file = os.path.join(path, executable_name)
+    #         if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
+    #             executable_full_path = path + '/' + executable_name
+    #             val += 1
+    #             # print("ExaGO executable {0} found in PATH".format(executable_name))
+    #             return executable_full_path
 
-        assert val == 0
-        print("ExaGO executables not found in PATH, checking in EXAGO_INSTALL_DIR")
-        if "EXAGO_INSTALL_DIR" in os.environ:
-            exe_file = os.path.join(os.environ["EXAGO_INSTALL_DIR"], 'sopflow')
-            if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
-                executable_full_path = os.environ["EXAGO_INSTALL_DIR"] + '/' + executable_name
-                val += 1
-                # print("ExaGO executable {0} found in EXAGO_INSTALL_DIR".format(executable_name))
-                return executable_full_path
-        else:
-            raise ValueError("ExaGO executables not found either in $PATH or $EXAGO_INSTALL_DIR. Please use the former to point to the executables")
+    #     assert val == 0
+    #     print("ExaGO executables not found in PATH, checking in EXAGO_INSTALL_DIR")
+    #     if "EXAGO_INSTALL_DIR" in os.environ:
+    #         exe_file = os.path.join(os.environ["EXAGO_INSTALL_DIR"], 'sopflow')
+    #         if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
+    #             executable_full_path = os.environ["EXAGO_INSTALL_DIR"] + '/' + executable_name
+    #             val += 1
+    #             # print("ExaGO executable {0} found in EXAGO_INSTALL_DIR".format(executable_name))
+    #             return executable_full_path
+    #     else:
+    #         raise ValueError("ExaGO executables not found either in $PATH or $EXAGO_INSTALL_DIR. Please use the former to point to the executables")
 
 
     def _non_wind_gens(self,
@@ -358,25 +380,25 @@ class ExaGO_Python:
             gen_df.loc[:,col] = self.gen_df_org.loc[:,col]
         return
 
-    def _set_load(self,
-                  p_df,
-                  q_df,
-                  bus_df):
-        # Bus loads not in the given dataframes are assumed to be zero
-        bus_df.loc[:,'Pd'] = 0.0
-        for bus in pd.to_numeric(p_df.columns):
-            idx = (bus_df.loc[:,'bus_i'] == bus)
-            bus_df.loc[idx,'Pd'] = p_df.loc[p_df.index[0],str(bus)]
-        bus_df.loc[:,'Qd'] = 0.0
-        for bus in pd.to_numeric(q_df.columns):
-            idx = (bus_df.loc[:,'bus_i'] == bus)
-            bus_df.loc[idx,'Qd'] = q_df.loc[q_df.index[0],str(bus)]
-        return
+    # def _set_load(self,
+    #               p_df,
+    #               q_df,
+    #               bus_df):
+    #     # Bus loads not in the given dataframes are assumed to be zero
+    #     bus_df.loc[:,'Pd'] = 0.0
+    #     for bus in pd.to_numeric(p_df.columns):
+    #         idx = (bus_df.loc[:,'bus_i'] == bus)
+    #         bus_df.loc[idx,'Pd'] = p_df.loc[p_df.index[0],str(bus)]
+    #     bus_df.loc[:,'Qd'] = 0.0
+    #     for bus in pd.to_numeric(q_df.columns):
+    #         idx = (bus_df.loc[:,'bus_i'] == bus)
+    #         bus_df.loc[idx,'Qd'] = q_df.loc[q_df.index[0],str(bus)]
+    #     return
 
-    def _scale_load(self, bus_df, scaling_factor):
-        bus_df.loc[:,'Pd'] = scaling_factor*bus_df.loc[:,'Pd']
-        bus_df.loc[:,'Qd'] = scaling_factor*bus_df.loc[:,'Qd']
-        return
+    # def _scale_load(self, bus_df, scaling_factor):
+    #     bus_df.loc[:,'Pd'] = scaling_factor*bus_df.loc[:,'Pd']
+    #     bus_df.loc[:,'Qd'] = scaling_factor*bus_df.loc[:,'Qd']
+    #     return
 
     def _assign_gen_ids(self, gen_df):
             gbuses = gen_df.loc[:,'bus']
@@ -526,10 +548,14 @@ class ExaGO_Python:
         # self.imat.write_matpower_file(matpower_file)
 
         # Python call
-        petsc_error_code = self.opf_base.solve()
+        self.opf_base.solve()
         if self.comm.Get_rank() == 0:
             self.opf_base.save_solution('MATPOWER', "base_{0}.m".format(self.grid_name))
         self.opf_base.solution_to_ps()
+
+        sts = self.opf_base.convergence_status()
+        if not sts:
+            raise Exception("Base case failed to converge. Unable to cost scenarios.")
 
         t1 = time.time()
 
