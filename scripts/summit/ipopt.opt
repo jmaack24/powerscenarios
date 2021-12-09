@@ -10,7 +10,7 @@ tol 1e-7
 # mu_strategy monotone
 # mu_strategy adaptive
 
-linear_solver ma97
+linear_solver ma57
 # ma57_pivtol 1e-4
 # ma57_automatic_scaling yes
 

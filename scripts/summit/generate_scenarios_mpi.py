@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import time
 import os
-from mpi4py import MPI
+
 # from exago.opflow import OPFLOW
 # from exago import config
 
@@ -10,6 +10,8 @@ from powerscenarios.parser import Parser
 from powerscenarios.grid_copy import Grid
 from powerscenarios.costs.exago.exago_lib import ExaGO_Lib
 import powerscenarios.utils as utils
+
+from mpi4py import MPI
 
 pd.set_option('display.width', None)
 
