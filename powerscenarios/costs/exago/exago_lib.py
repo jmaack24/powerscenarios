@@ -196,9 +196,8 @@ class ExaGO_Lib(AbstractCostingFidelity):
 
             sts = opf_object.convergence_status()
             q_sts_local[i] = sts
-            if sts:
-                q_cost_local[i] = opf_object.objective_function
-            else:
+            q_cost_local[i] = opf_object.objective_function
+            if sts == False or q_cost_local[i] < base_cost:
                 ts_str = str(ts).replace(' ', 'T').replace(':','_').split('+')[0]
                 soln_file = 'ego_opflow_{}.m'.format(ts_str)
                 opf_object.save_solution('MATPOWER', soln_file)
@@ -232,6 +231,10 @@ class ExaGO_Lib(AbstractCostingFidelity):
             if np.sum(idx) > 0:
                 print("ExaGO OPFLOW did not converge for the following timestamps:\n",
                       sts_n[idx].index)
+            idx = cost_n <= 0.0
+            if np.sum(idx) > 0:
+                print("Negative prices found for the following timestamps:\n",
+                      cost_n[idx].index)
 
         # for i in range(comm_size):
         #     if my_mpi_rank == i:
@@ -527,8 +530,12 @@ class ExaGO_Python:
         self.opf_base = OPFLOW()
         self.opf_base.dont_finalize()
         self.opf_base.read_mat_power_data(self.network_file)
-        self.opf_base.set_include_loadloss(False)
-        self.opf_base.set_include_powerimbalance(False)
+        # self.opf_base.set_include_loadloss(False)
+        # self.opf_base.set_include_powerimbalance(False)
+        self.opf_base.set_include_loadloss(True)
+        self.opf_base.set_loadloss_penalty(833)
+        self.opf_base.set_include_powerimbalance(True)
+        self.opf_base.set_powerimbalance_penalty(933)
         self.opf_base.set_model('POWER_BALANCE_POLAR')
         self.opf_base.set_solver('IPOPT')
         self.opf_base.set_initialization('ACPF')
