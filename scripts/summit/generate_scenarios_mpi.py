@@ -105,7 +105,7 @@ if my_mpi_rank == 0:
 # other parameters
 sampling_method = "importance"
 fidelity = "exago_lib"
-n_scenarios = 10
+n_scenarios = 2
 n_periods = 1
 
 ########################################################
@@ -143,8 +143,17 @@ for sim_timestamp in sim_timestamps:
         # random_seed=6,
         random_seed=random_seed,
         output_format=0,
-        pricing_scen_ct = 'all',
-        mpi_comm = comm
+        pricing_scen_ct='list',
+        pricing_scen_list=list(map(pd.Timestamp,[
+            '2009-02-15 02:40:00+0000',
+            '2009-05-03 06:10:00+0000',
+            '2009-07-20 02:20:00+0000',
+            '2009-10-12 10:35:00+0000',
+            '2010-11-25 01:45:00+0000',
+            '2012-10-07 11:10:00+0000',
+            '2013-03-14 14:00:00+0000',
+        ])),
+        mpi_comm=comm
     )
     all_scenarios_df.loc[sim_timestamp] = scenarios_df
     all_weights_df.loc[sim_timestamp] = weights_df.loc[sim_timestamp]
