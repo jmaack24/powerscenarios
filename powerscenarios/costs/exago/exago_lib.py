@@ -34,7 +34,9 @@ class ExaGO_Lib(AbstractCostingFidelity):
                  total_power_t0,
                  WTK_DATA_PRECISION=6,
                  nscen_priced=1,
-                 mpi_comm=None):
+                 mpi_comm=None,
+                 ps_wind_gens=None,
+                 ):
 
         AbstractCostingFidelity.__init__(self,
                                          n_scenarios,
@@ -54,23 +56,27 @@ class ExaGO_Lib(AbstractCostingFidelity):
                                     }
 
         self.comm = mpi_comm # MPI communicator
-        self._create_ego_object()
+        wind_gen_max = ps_wind_gens.loc[:,"GenMWMax"]
+        wind_gen_max.index = ps_wind_gens.loc[:,"GenUID"]
+        self._create_ego_object(wind_gen_max=wind_gen_max)
 
         return
 
     def _create_ego_object(self,
-                           network_file=None):
+                           network_file=None,
+                           wind_gen_max=None,
+                           ):
         # Data files for creating the file based exago object
         # Data files for creating the file based exago object
         base_dir = Path(__file__).parents[3]
         grid_data_dir = os.path.join(base_dir,"data","grid-data")
-        #print("base_dir: {}".format(base_dir))
-        #print("grid_data_dir: {}".format(grid_data_dir))
+        # print("base_dir: {}".format(base_dir))
+        # print("grid_data_dir: {}".format(grid_data_dir))
 
         network_file = os.path.join(grid_data_dir,"{0}/case_{0}.m".format(self.grid_name))
-        grid_aux_file =os.path.join(grid_data_dir,"{0}/{0}.aux".format(self.grid_name))
-        #print("network_file: {}".format(network_file))
-        #print("grid_aux_file: {}".format(grid_aux_file))
+        # grid_aux_file = os.path.join(grid_data_dir,"{0}/{0}.aux".format(self.grid_name))
+        # print("network_file: {}".format(network_file))
+        # print("grid_aux_file: {}".format(grid_aux_file))
 
         network_file = os.path.join(grid_data_dir,"{0}/case_{0}.m".format(self.grid_name))
         # network_file = "/Users/kpanda/UserApps/powerscenarios/data/grid-data/{0}/case_{0}.m".format(self.grid_name)
@@ -78,8 +84,14 @@ class ExaGO_Lib(AbstractCostingFidelity):
         real_load_file = None # "/Users/kpanda/UserApps/powerscenarios/data/load-data/{0}_loadP.csv".format(self.grid_name)
         reactive_load_file = None # "/Users/kpanda/UserApps/powerscenarios/data/load-data/{0}_loadQ.csv".format(self.grid_name)
 
-        self.ego = ExaGO_Python(network_file, load_dir, self.grid_name,
-                                real_load_file, reactive_load_file, comm=self.comm)
+        self.ego = ExaGO_Python(network_file,
+                                load_dir,
+                                self.grid_name,
+                                real_load_file,
+                                reactive_load_file,
+                                comm=self.comm,
+                                wind_gen_max=wind_gen_max,
+                                )
         if self.ego.comm.Get_rank() == 0:
             self.ego._cleanup() # Lets clean up the file based implementation.
 
@@ -90,7 +102,9 @@ class ExaGO_Lib(AbstractCostingFidelity):
                               actuals_df,
                               binned_scenarios_df,
                               start_time,
-                              random_seed=np.random.randint(2 ** 31 - 1)):
+                              random_seed=np.random.randint(2 ** 31 - 1),
+                              save_opf_results=False,
+                              ):
 
         stop_time = start_time # For now
         my_mpi_rank = self.ego.comm.Get_rank()
@@ -169,10 +183,10 @@ class ExaGO_Lib(AbstractCostingFidelity):
             opf_object = OPFLOW()
             opf_object.dont_finalize()
             opf_object.read_mat_power_data(self.ego.network_file)
-            opf_object.set_include_loadloss(True)
-            opf_object.set_loadloss_penalty(833)
+            opf_object.set_include_loadloss(False)
+            # opf_object.set_loadloss_penalty(833)
             opf_object.set_include_powerimbalance(True)
-            opf_object.set_powerimbalance_penalty(933)
+            # opf_object.set_powerimbalance_penalty(833)
             opf_object.set_model('POWER_BALANCE_POLAR')
             opf_object.set_solver('IPOPT')
             opf_object.set_initialization('ACPF')
@@ -197,7 +211,7 @@ class ExaGO_Lib(AbstractCostingFidelity):
             sts = opf_object.convergence_status()
             q_sts_local[i] = sts
             q_cost_local[i] = opf_object.objective_function
-            if sts == False or q_cost_local[i] < base_cost:
+            if sts == False or q_cost_local[i] < base_cost or save_opf_results:
                 ts_str = str(ts).replace(' ', 'T').replace(':','_').split('+')[0]
                 soln_file = 'ego_opflow_{}.m'.format(ts_str)
                 opf_object.save_solution('MATPOWER', soln_file)
@@ -260,7 +274,9 @@ class ExaGO_Python:
                  real_load_file=None,
                  reactive_load_file=None,
                  year=2020,
-                 comm=None):
+                 comm=None,
+                 wind_gen_max=None,
+                 ):
 
         start_init = time.time()
 
@@ -324,11 +340,14 @@ class ExaGO_Python:
             bidx = buses == bus
             gen_id.loc[bidx] = range(1,sum(bidx)+1)
 
-        pmax = self.gen_df_org.loc[idx,'Pmax']
-        pmax.index = (buses.apply(str)
-                      + '_Wind_'
-                      + gen_id.apply(str))
-        self.wind_max = pmax
+        if wind_gen_max is None:
+            pmax = self.gen_df_org.loc[idx,'Pmax']
+            pmax.index = (buses.apply(str)
+                          + '_Wind_'
+                          + gen_id.apply(str))
+            self.wind_max = pmax
+        else:
+            self.wind_max = wind_gen_max
 
         # # Recover ExaGO executables, we will check if the exist in PATH and
         # # EXAGO_INSTALL_DIR
