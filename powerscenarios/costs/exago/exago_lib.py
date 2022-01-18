@@ -35,7 +35,7 @@ class ExaGO_Lib(AbstractCostingFidelity):
                  WTK_DATA_PRECISION=6,
                  nscen_priced=1,
                  mpi_comm=None,
-                 ps_wind_gens=None,
+                 ps_gens_df=None,
                  ):
 
         AbstractCostingFidelity.__init__(self,
@@ -56,17 +56,15 @@ class ExaGO_Lib(AbstractCostingFidelity):
                                     }
 
         self.comm = mpi_comm # MPI communicator
-        wind_gen_max = ps_wind_gens.loc[:,"GenMWMax"]
-        wind_gen_max.index = ps_wind_gens.loc[:,"GenUID"]
-        self._create_ego_object(wind_gen_max=wind_gen_max)
+        self._create_ego_object(ps_gens_df=ps_gens_df)
 
         return
 
     def _create_ego_object(self,
                            network_file=None,
-                           wind_gen_max=None,
+                           ps_gens_df=None,
                            ):
-        # Data files for creating the file based exago object
+
         # Data files for creating the file based exago object
         base_dir = Path(__file__).parents[3]
         grid_data_dir = os.path.join(base_dir,"data","grid-data")
@@ -79,21 +77,16 @@ class ExaGO_Lib(AbstractCostingFidelity):
         # print("grid_aux_file: {}".format(grid_aux_file))
 
         network_file = os.path.join(grid_data_dir,"{0}/case_{0}.m".format(self.grid_name))
-        # network_file = "/Users/kpanda/UserApps/powerscenarios/data/grid-data/{0}/case_{0}.m".format(self.grid_name)
-        load_dir = None # "/Users/kpanda/UserApps/powerscenarios/data/load-data"
-        real_load_file = None # "/Users/kpanda/UserApps/powerscenarios/data/load-data/{0}_loadP.csv".format(self.grid_name)
-        reactive_load_file = None # "/Users/kpanda/UserApps/powerscenarios/data/load-data/{0}_loadQ.csv".format(self.grid_name)
 
         self.ego = ExaGO_Python(network_file,
-                                load_dir,
                                 self.grid_name,
-                                real_load_file,
-                                reactive_load_file,
+                                # real_load_file,
+                                # reactive_load_file,
                                 comm=self.comm,
-                                wind_gen_max=wind_gen_max,
+                                ps_gens_df=ps_gens_df,
                                 )
-        if self.ego.comm.Get_rank() == 0:
-            self.ego._cleanup() # Lets clean up the file based implementation.
+        # if self.ego.comm.Get_rank() == 0:
+        #     self.ego._cleanup() # Lets clean up the file based implementation.
 
         return
 
@@ -269,16 +262,16 @@ class ExaGO_Python:
 
     def __init__(self,
                  network_file,
-                 load_dir,
                  grid_name,
+                 load_dir=None,
                  real_load_file=None,
                  reactive_load_file=None,
                  year=2020,
                  comm=None,
-                 wind_gen_max=None,
+                 ps_gens_df=None,
                  ):
 
-        start_init = time.time()
+        # print("Loading network from file: ", network_file)
 
         # MPI specifics
         if comm == None:
@@ -290,45 +283,40 @@ class ExaGO_Python:
 
         # self.exe_path = exe_path
         self.grid_name = grid_name
-        self.network_file = network_file
+
+        # self.network_file = network_file
         self.exago_ignore = -1.e6
 
-        start = time.time()
         self.imat = MatpowerHandler(network_file)
-        stop = time.time()
-        # print("Read Matpower: {:g}(s)".format(stop - start))
+
+        # Overwrite max and min gens if provided
+        if ps_gens_df is not None:
+            gen_df = self.imat.get_table('gen')
+            gen_df['Pmax'] = ps_gens_df.loc[:,'GenMWMax']
+            gen_df['Pmin'] = ps_gens_df.loc[:,'GenMWMin']
+
         self.gen_df_org = self.imat.get_table('gen').copy()
         self.bus_df_org = self.imat.get_table('bus').copy()
         self.gids = self._assign_gen_ids(self.gen_df_org)
 
-        # print("Reading in load data...")
-        # Read in the load dataframes
-        start = time.time()
-        if real_load_file is None:
-            self.p_load_df = None
-            # raise ValueError("The real load file has not been specified.")
-        else:
-            p_df = pd.read_csv(real_load_file, index_col=0, parse_dates=True)
-            p_df.index = p_df.index.map(lambda t: t.replace(year=year))
-            self.p_load_df = p_df
+        # # print("Reading in load data...")
+        # # Read in the load dataframes
+        # if real_load_file is None:
+        #     self.p_load_df = None
+        # else:
+        #     p_df = pd.read_csv(real_load_file, index_col=0, parse_dates=True)
+        #     p_df.index = p_df.index.map(lambda t: t.replace(year=year))
+        #     self.p_load_df = p_df
 
-        if reactive_load_file is None:
-            self.q_load_df = None
-            # raise ValueError("The reactive load file has not been specified.")
-        else:
-            q_df = pd.read_csv(reactive_load_file, index_col=0, parse_dates=True)
-            q_df.index = q_df.index.map(lambda t: t.replace(year=year))
-            self.q_load_df = q_df
-        stop = time.time()
-        # print("Done. Time: {:g}(s)".format(stop - start))
-
-        # gen_type = self.imat.static['gentype'].split('\n')[1:-2]
-        # assert len(gen_type) == self.gen_df_org.shape[0]
-        # self.gen_type = pd.Series(map(lambda s: s.strip(' \t\r\n\';)'), gen_type))
+        # if reactive_load_file is None:
+        #     self.q_load_df = None
+        #     # raise ValueError("The reactive load file has not been specified.")
+        # else:
+        #     q_df = pd.read_csv(reactive_load_file, index_col=0, parse_dates=True)
+        #     q_df.index = q_df.index.map(lambda t: t.replace(year=year))
+        #     self.q_load_df = q_df
 
         gen_type = self.imat.static['genfuel'].split('\n')[1:-2]
-        # print("len(gen_type) = ", len(gen_type))
-        # print("self.gen_df_org.shape[0] = ", self.gen_df_org.shape[0])
         assert len(gen_type) == self.gen_df_org.shape[0]
         self.gen_type = pd.Series(map(lambda s: s.strip(' \t\r\n\';)'), gen_type))
 
@@ -340,51 +328,23 @@ class ExaGO_Python:
             bidx = buses == bus
             gen_id.loc[bidx] = range(1,sum(bidx)+1)
 
-        if wind_gen_max is None:
+        if ps_gens_df is None:
             pmax = self.gen_df_org.loc[idx,'Pmax']
             pmax.index = (buses.apply(str)
                           + '_Wind_'
                           + gen_id.apply(str))
             self.wind_max = pmax
         else:
+            idx = self._wind_gens(self.gen_type)
+            wind_gen_max = ps_gens_df.loc[idx,'GenMWMax']
             self.wind_max = wind_gen_max
+            self.wind_max.index = ps_gens_df.loc[idx,'GenUID']
 
-        # # Recover ExaGO executables, we will check if the exist in PATH and
-        # # EXAGO_INSTALL_DIR
-        # self.opflow_executable = self._check_for_exago('opflow')
-        # self.sopflow_executable = self._check_for_exago('sopflow')
-        # if my_mpi_rank == 0:
-        #     print("opflow executable = ", self.opflow_executable)
-        #     print("sopflow executable = ", self.sopflow_executable)
-
-        stop_init = time.time()
-        # print("Init complete. Time: {:g}(s)".format(stop_init - start_init))
+        matpower_file = os.path.join('EXAGO_LIB_case_{}.m'.format(self.grid_name))
+        self.imat.write_matpower_file(matpower_file)
+        self.network_file = matpower_file
 
         return
-
-    # def _check_for_exago(self, executable_name):
-    #     # This function checks if an exago executable exists
-    #     # Step 1: Check for exago executable in PATH
-    #     val = 0
-    #     for path in os.environ["PATH"].split(os.pathsep):
-    #         exe_file = os.path.join(path, executable_name)
-    #         if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
-    #             executable_full_path = path + '/' + executable_name
-    #             val += 1
-    #             # print("ExaGO executable {0} found in PATH".format(executable_name))
-    #             return executable_full_path
-
-    #     assert val == 0
-    #     print("ExaGO executables not found in PATH, checking in EXAGO_INSTALL_DIR")
-    #     if "EXAGO_INSTALL_DIR" in os.environ:
-    #         exe_file = os.path.join(os.environ["EXAGO_INSTALL_DIR"], 'sopflow')
-    #         if os.path.isfile(exe_file) and os.access(exe_file, os.X_OK):
-    #             executable_full_path = os.environ["EXAGO_INSTALL_DIR"] + '/' + executable_name
-    #             val += 1
-    #             # print("ExaGO executable {0} found in EXAGO_INSTALL_DIR".format(executable_name))
-    #             return executable_full_path
-    #     else:
-    #         raise ValueError("ExaGO executables not found either in $PATH or $EXAGO_INSTALL_DIR. Please use the former to point to the executables")
 
 
     def _non_wind_gens(self,
@@ -477,14 +437,18 @@ class ExaGO_Python:
             bus = int(wgen.split('_')[0])
             gen_id = int(wgen.split('_')[2]) # - 1
             widx = (gen_df.loc[:,'bus'] == bus) & (idx)
-            # print("wgen = ", wgen, "bus = ", repr(bus), "gen_id = ", type(gen_id))
-            # print("widx = ", widx)
             if widx.sum() >= 1:
                 if gen_id < 10:
                     g_id = str(gen_id) + " "
                 else:
                     g_id = str(gen_id)
-                opf.ps_set_gen_power_limits(bus, g_id, w_df.loc[w_df.index[0], wgen], 0, self.exago_ignore, self.exago_ignore)
+                opf.ps_set_gen_power_limits(bus,
+                                            g_id,
+                                            w_df.loc[w_df.index[0], wgen],
+                                            0,
+                                            self.exago_ignore,
+                                            self.exago_ignore
+                                            )
             else:
                 print("Unable to identify row corresponding to generator {}".format(wgen))
 
@@ -521,13 +485,13 @@ class ExaGO_Python:
         return (pg_set, qg_set)
 
 
-    def _cleanup(self):
-        if path.exists("opflowout.m"):
-            os.remove("opflowout.m")
-        if path.exists("sopflowout"):
-            shutil.rmtree("sopflowout")
-        if path.exists("case_{0}.m".format(self.grid_name)):
-            os.remove("case_{0}.m".format(self.grid_name))
+    # def _cleanup(self):
+    #     if path.exists("opflowout.m"):
+    #         os.remove("opflowout.m")
+    #     if path.exists("sopflowout"):
+    #         shutil.rmtree("sopflowout")
+    #     if path.exists("case_{0}.m".format(self.grid_name)):
+    #         os.remove("case_{0}.m".format(self.grid_name))
 
     def base_cost(self,
                   start_time,
@@ -540,15 +504,16 @@ class ExaGO_Python:
                   system="Summit"
                   ):
 
-        t0 = time.time()
+        # t0 = time.time()
 
-        stop_time = start_time
-        self._restore_org_gen_table()
+        # stop_time = start_time
+        # self._restore_org_gen_table()
 
         # Create OPFLOW object
         self.opf_base = OPFLOW()
         self.opf_base.dont_finalize()
         self.opf_base.read_mat_power_data(self.network_file)
+        # self.opf_base.read_mat_power_data(matpower_file)
         self.opf_base.set_include_loadloss(False)
         self.opf_base.set_include_powerimbalance(False)
         # self.opf_base.set_include_loadloss(True)
@@ -561,17 +526,8 @@ class ExaGO_Python:
         # self.opf_base.set_genbusvoltage('VARIABLE_WITHIN_BOUNDS')
         self.opf_base.setup_ps()
 
-        ## # Uncomment for custom load
-        # p_df = self.p_load_df.loc[start_time:stop_time, :]
-        # q_df = self.q_load_df.loc[start_time:stop_time, :]
-        # # self._set_load(p_df, q_df, self.imat.get_table('bus')) # Uncomment for our load
-        # # self._scale_load(self.imat.get_table('bus'), 0.9)
-
         wf_df = wind_fcst_df
         self._set_wind_new(self.opf_base, wf_df, self.imat.get_table('gen'), self.gen_type)
-
-        # matpower_file = os.path.join('case_{}.m'.format(self.grid_name))
-        # self.imat.write_matpower_file(matpower_file)
 
         # Python call
         self.opf_base.solve()
@@ -583,21 +539,21 @@ class ExaGO_Python:
         if not sts:
             raise Exception("Base case failed to converge. Unable to cost scenarios.")
 
-        t1 = time.time()
+        # t1 = time.time()
 
         obj = self.opf_base.objective_function
         set_points = self._extract_set_points(self.opf_base)
         # idx = self._non_wind_gens(self.gen_type)
         # set_points = result.get_table('gen').loc[idx,:]
 
-        t2 = time.time()
+        # t2 = time.time()
 
-        total_elapsed = t2 - t0
+        # total_elapsed = t2 - t0
 
-        if self.comm.Get_rank() == 0:
-            print("**** Base Cost Timing ****")
-            print("Total time in function = {0}".format(total_elapsed))
-            print("Time in base cost solve = {0}".format(t1 - t0))
+        # if self.comm.Get_rank() == 0:
+        #     print("**** Base Cost Timing ****")
+        #     print("Total time in function = {0}".format(total_elapsed))
+        #     print("Time in base cost solve = {0}".format(t1 - t0))
 
         return (obj, set_points)
 

@@ -588,7 +588,8 @@ class Grid(object):
                     save_opf_results = True
                     ts_list = kwargs["pricing_scen_list"]
                     pricing_scen_ct = len(ts_list)
-                    print("Pricing the following candidate scenarios: ", ts_list)
+                    if mpi_comm.Get_rank() == 0:
+                        print("Pricing the following candidate scenarios: ", ts_list)
                     p_bin = p_bin.loc[ts_list]
                 else:
                     save_opf_results = False
@@ -608,7 +609,8 @@ class Grid(object):
                                    total_power_t0,
                                    nscen_priced=pricing_scen_ct,
                                    mpi_comm=mpi_comm,
-                                   ps_wind_gens=self.wind_generators)
+                                   ps_gens_df=self.generators
+                                   )
                 scenarios_df_copy = scenarios_df.drop(columns=["TotalPower", "Deviation"])
 
                 cost_n = pmodel.compute_scenario_cost(actuals_df,

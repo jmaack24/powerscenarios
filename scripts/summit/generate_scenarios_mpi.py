@@ -20,13 +20,13 @@ comm = MPI.COMM_WORLD
 my_mpi_rank = comm.Get_rank()
 comm_size = comm.Get_size()
 
-read_grid_data = True
-
 if my_mpi_rank == 0:
     start_time = time.time() # Start the timinig
 
 # grid_name = "ACTIVSg200"  # TAMU 200 bus case
 grid_name = "ACTIVSg2000"  # TAMU 2000 bus case
+
+read_grid_data = (grid_name == 'ACTIVSg2000')
 
 if grid_name == "ACTIVSg200":
     sim_timestamps = [pd.Timestamp("2020-12-20 08:00:00+0000", tz="UTC"),]
@@ -143,17 +143,18 @@ for sim_timestamp in sim_timestamps:
         # random_seed=6,
         random_seed=random_seed,
         output_format=0,
-        pricing_scen_ct='list',
+        pricing_scen_ct='all',
         pricing_scen_list=list(map(pd.Timestamp,[
-            #### Large Cost for Positive Deviation ####
-            '2009-05-31 23:55:00+00:00',
-            '2012-05-31 23:55:00+00:00'
-            #### Subset of Cost Below LB Timestamps ####
+            ######## ACTIVSg2000 ########
+            # #### Large Cost for Positive Deviation ####
+            # '2009-05-31 23:55:00+00:00',
+            # '2012-05-31 23:55:00+00:00',
+            # #### Subset of Cost Below LB Timestamps ####
             # '2008-01-10 15:15:00+00:00',
             # '2008-03-07 13:30:00+00:00',
             # '2008-03-07 14:15:00+00:00',
             # '2008-03-15 13:45:00+00:00',
-            #### Failed Convergence Timestamps ####
+            # #### Failed Convergence Timestamps ####
             # '2009-02-15 02:40:00+0000',
             # '2009-05-03 06:10:00+0000',
             # '2009-07-20 02:20:00+0000',
