@@ -204,10 +204,15 @@ class ExaGO_Lib(AbstractCostingFidelity):
             sts = opf_object.convergence_status()
             q_sts_local[i] = sts
             q_cost_local[i] = opf_object.objective_function
-            if sts == False or q_cost_local[i] < base_cost or save_opf_results:
+            # if sts == False or q_cost_local[i] < base_cost or save_opf_results:
+            if (sts == False or
+                save_opf_results or
+                opf_object.objective_function + 10.0 < base_cost
+                ):
                 ts_str = str(ts).replace(' ', 'T').replace(':','_').split('+')[0]
                 soln_file = 'ego_opflow_{}.m'.format(ts_str)
                 opf_object.save_solution('MATPOWER', soln_file)
+
 
             # Increment the time-stamp so as to price other scenarios
             # ts += pd.Timedelta(minutes=step)
@@ -236,12 +241,15 @@ class ExaGO_Lib(AbstractCostingFidelity):
         if my_mpi_rank == 0:
             idx = sts_n == False
             if np.sum(idx) > 0:
-                print("ExaGO OPFLOW did not converge for the following timestamps:\n",
-                      sts_n[idx].index)
-            idx = cost_n <= 0.0
+                unconv_file = "ExaGO_unconverged_{}.csv".format(self.grid_name)
+                sts_n[idx].index.to_series().to_csv(unconv_file)
+                print("ExaGO OPFLOW did not converge for {} timestamps. Timestamps have been printed to the file: {}".format(np.sum(idx), unconv_file))
+
+            idx = cost_n < 0.0
             if np.sum(idx) > 0:
-                print("Negative prices found for the following timestamps:\n",
-                      cost_n[idx].index)
+                # print("Negative prices found for the following timestamps:\n",
+                #       cost_n[idx].index)
+                print("Negative prices have been found for {} timestamps. Largest magnitude is {}".format(np.sum(idx), cost_n[idx].abs().max()))
 
         # for i in range(comm_size):
         #     if my_mpi_rank == i:

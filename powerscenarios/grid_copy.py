@@ -634,7 +634,7 @@ class Grid(object):
               	# print("Negative costs")
               	# cost_n = cost_n_orig - cost_n_orig.min() + 1e-12
                 idx = cost_n < 0.0
-                cost_n[idx] = 0.0
+                cost_n[idx] = 1e-14
 
             # # compute costs of each 1-period scenario
             # cost_1 = scenarios_df["Deviation"].apply(
